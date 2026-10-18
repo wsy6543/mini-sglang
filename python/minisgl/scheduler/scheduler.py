@@ -108,26 +108,33 @@ class Scheduler(SchedulerIOMixin):
     def normal_loop(self) -> None:
         blocking = not (self.prefill_manager.runnable or self.decode_manager.runnable)
         for msg in self.receive_msg(blocking=blocking):
+            # 添加到prefill队列
             self._process_one_msg(msg)
 
+        # 调度
         forward_input = self._schedule_next_batch()
         ongoing_data = None
         if forward_input is not None:
+            # 推理
             ongoing_data = (forward_input, self._forward(forward_input))
 
+        # post process：基本就是释放资源啥的了
         self._process_last_data(ongoing_data)
 
+    # 服务启动入口
     @torch.inference_mode()
     def run_forever(self) -> NoReturn:
         if ENV.DISABLE_OVERLAP_SCHEDULING:
             with self.engine_stream_ctx:
                 self.engine.stream.wait_stream(self.stream)
                 while True:
+                    # 严格串行
                     self.normal_loop()
         else:
             assert torch.cuda.current_stream() == self.stream
             data = None
             while True:
+                # 一般都是走重叠调度，能提高GPU利用率
                 data = self.overlap_loop(data)
 
     def shutdown(self) -> None:
@@ -135,6 +142,7 @@ class Scheduler(SchedulerIOMixin):
         self.sync_all_ranks()
         self.engine.shutdown()
 
+    # 其实就是post precess，的后处理阶段，进行一些资源的释放。
     def _process_last_data(self, last_data: ForwardData | None) -> None:
         if last_data is None:
             return
@@ -186,7 +194,9 @@ class Scheduler(SchedulerIOMixin):
                 logger.warning_rank0(
                     f"Adjust max_tokens to {max_output_len} for request {msg.uid}."
                 )
+            # 添加到pending list
             self.prefill_manager.add_one_req(msg)
+        # 用户掉线，直接清理请求
         elif isinstance(msg, AbortBackendMsg):
             logger.debug_rank0("Aborting request %d", msg.uid)
             req_to_free = self.prefill_manager.abort_req(msg.uid)
@@ -201,6 +211,7 @@ class Scheduler(SchedulerIOMixin):
         self.table_manager.free(req.table_idx)
         self.cache_manager.cache_req(req, finished=True)
 
+    # 准备工作
     def _prepare_batch(self, batch: Batch) -> ForwardInput:
         self.engine.graph_runner.pad_batch(batch)
         self.cache_manager.allocate_paged(batch.reqs)
@@ -218,12 +229,14 @@ class Scheduler(SchedulerIOMixin):
 
     def _schedule_next_batch(self) -> ForwardInput | None:
         # TODO: support other policies: e.g. DECODE first
+        # 优先prefill，再decode
         batch = (
             self.prefill_manager.schedule_next_batch(self.prefill_budget)
             or self.decode_manager.schedule_next_batch()
         )
         return self._prepare_batch(batch) if batch else None
 
+    # 前向推理
     def _forward(self, forward_input: ForwardInput) -> ForwardOutput:
         batch, sample_args, input_mapping, output_mapping = forward_input
         batch.input_ids = self.token_pool[input_mapping]

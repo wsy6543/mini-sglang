@@ -54,6 +54,7 @@ class Engine:
         # ======================= KV cache initialization ========================
         self.num_pages = self._determine_num_pages(init_free_memory, config)
         num_tokens = self.num_pages * config.page_size
+        # 这个是物理内存，scheduler里面的cache_manager是元数据
         self.ctx.kv_cache = self.kv_cache = create_kvcache_pool(
             model_config=config.model_config,
             num_pages=self.num_pages + 1,  # +1 for dummy page
@@ -66,6 +67,7 @@ class Engine:
         # NOTE: 1. aligned to 128 bytes; 2. store raw locations instead of pages
         self.max_seq_len = min(config.max_seq_len, num_tokens)
         aligned_max_seq_len = _align_up_32(self.max_seq_len)
+        # page_table 是一个二维tensor，（max_running_req[最大多少个seq]，max_seq_len[每个seq最长有多少个token]）
         self.ctx.page_table = self.page_table = torch.zeros(  # + 1 for dummy request
             (config.max_running_req + 1, aligned_max_seq_len),
             dtype=torch.int32,

@@ -263,6 +263,7 @@ async def v1_completions(req: OpenAICompletionRequest, request: Request):
 
     # TODO: support more sampling parameters
     uid = state.new_user()
+    # 发给tokenizer进程，没有lb逻辑，这个是zmq内部处理
     await state.send_one(
         TokenizeMsg(
             uid=uid,
@@ -428,6 +429,7 @@ def run_api_server(config: ServerArgs, start_backend: Callable[[], None], run_sh
     port = config.server_port
 
     assert _GLOBAL_STATE is None, "Global state is already initialized"
+    # 配置项目，全局共用的东西
     _GLOBAL_STATE = FrontendManager(
         config=config,
         recv_tokenizer=ZmqAsyncPullQueue(

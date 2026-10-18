@@ -17,6 +17,7 @@ class CacheManager:
         # The `_free_slots` follows a page-aligned manner. For example, if page_size = 2,
         # the `_free_slots` may look like [0, 2, 4, 6, ...], and each slot represents a page.
         device = page_table.device
+        # 长度是num_pages, 每个slot的step是page_size
         self.free_slots = torch.arange(num_pages, dtype=torch.int32, device=device) * page_size
         self.prefix_cache = create_prefix_cache(device=device, type=type)
         self.device = device
@@ -24,6 +25,7 @@ class CacheManager:
         self.page_table = page_table
         self.page_size = page_size
 
+    # 看看请求匹配多个prefix，给prefill调用的
     def match_req(self, req: PendingReq) -> MatchResult:
         input_len = req.input_len
         assert input_len > 0, "Input length must be greater than 0."
@@ -39,6 +41,7 @@ class CacheManager:
     def unlock(self, handle: BaseCacheHandle) -> None:
         self.prefix_cache.lock_handle(handle, unlock=True)
 
+    # 一些没命中缓存的分配kv
     def allocate_paged(self, reqs: List[Req]) -> None:
         needed_pages = 0
         allocation_info: List[Tuple[int, int, int]] = []
@@ -52,6 +55,7 @@ class CacheManager:
             allocated = self._page_to_token(self._allocate(needed_pages))
             _write_page_table(self.page_table, allocated, allocation_info, self.page_size)
 
+    # 缓存kv cache
     def cache_req(self, req: Req, *, finished: bool) -> None:
         # ==================================== valid cache region ====================================
         # [0, req.cached_len)                       This part is valid for attention kernel read/write.
@@ -103,6 +107,7 @@ class CacheManager:
             del self._free
             self.free_slots = torch.cat([self.free_slots] + lazy_free_list)
 
+    # 分配地址
     def _allocate(self, needed_pages: int) -> torch.Tensor:
         if needed_pages > (free_pages := len(self.free_slots)):
             evicted = self.prefix_cache.evict((needed_pages - free_pages) * self.page_size)
@@ -123,7 +128,7 @@ class CacheManager:
         offsets = torch.arange(self.page_size, device=self.device, dtype=torch.int32)
         return (pages.unsqueeze(1) + offsets).flatten()
 
-
+# 写入到元数据中
 def _write_page_table(
     page_table: torch.Tensor,
     allocated: torch.Tensor,

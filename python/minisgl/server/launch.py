@@ -44,6 +44,9 @@ def launch_server(run_shell: bool = False) -> None:
     server_args, run_shell = parse_args(sys.argv[1:], run_shell)
     logger = init_logger(__name__, "initializer")
 
+    # 启动旁路进程
+    # n个minisgl-TP0-scheduler进程
+    # 1个minisgl-detokenizer-0 进程
     def start_subprocess() -> None:
         import multiprocessing as mp
 

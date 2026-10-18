@@ -157,6 +157,7 @@ class GraphRunner:
         g.replay()
         return self.buffer.logits[: batch.size]
 
+    # 批次填充
     def pad_batch(self, batch: Batch) -> None:
         padded_size = (  # choose the first available batch size
             next(bs for bs in self.graph_bs_list if bs >= batch.size)

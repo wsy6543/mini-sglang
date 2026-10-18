@@ -68,6 +68,7 @@ def tokenize_worker(
             tokenize_msg = [m for m in pending_msg if isinstance(m, TokenizeMsg)]
             abort_msg = [m for m in pending_msg if isinstance(m, AbortMsg)]
             assert len(detokenize_msg) + len(tokenize_msg) + len(abort_msg) == len(pending_msg)
+            # 走解码流程
             if len(detokenize_msg) > 0:
                 replies = detokenize_manager.detokenize(detokenize_msg)
                 batch_output = BatchFrontendMsg(
@@ -82,8 +83,10 @@ def tokenize_worker(
                 )
                 if len(batch_output.data) == 1:
                     batch_output = batch_output.data[0]
+                # 发给server
                 send_frontend.put(batch_output)
 
+            # 走编码流程
             if len(tokenize_msg) > 0:
                 tensors = tokenize_manager.tokenize(tokenize_msg)
                 batch_output = BatchBackendMsg(
@@ -98,13 +101,16 @@ def tokenize_worker(
                 )
                 if len(batch_output.data) == 1:
                     batch_output = batch_output.data[0]
+                # 发给scheduler
                 send_backend.put(batch_output)
+            # 被挤占的req
             if len(abort_msg) > 0:
                 batch_output = BatchBackendMsg(
                     data=[AbortBackendMsg(uid=msg.uid) for msg in abort_msg]
                 )
                 if len(batch_output.data) == 1:
                     batch_output = batch_output.data[0]
+                # 发给scheduler
                 send_backend.put(batch_output)
     except KeyboardInterrupt:
         pass

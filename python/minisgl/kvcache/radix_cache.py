@@ -105,11 +105,12 @@ class RadixPrefixCache(BasePrefixCache):
         self.page_size = get_global_ctx().page_size
         self.key_fn = _get_key_fn(self.page_size)
         self.empty_tensor = torch.empty(0, dtype=torch.int32, device=device)
-        self.evictable_size = 0
-        self.protected_size = 0
+        self.evictable_size = 0   # 可以驱逐的size
+        self.protected_size = 0   # 被保护的size
         self.root_node = RadixTreeNode(self.key_fn)
         self.root_node.ref_count = 1  # root is always protected
 
+    # 锁操作
     def lock_handle(self, handle: BaseCacheHandle, unlock: bool = False) -> None:
         assert isinstance(handle, RadixCacheHandle)
         node = handle.node
@@ -133,11 +134,13 @@ class RadixPrefixCache(BasePrefixCache):
         node, prefix_len = self._tree_walk(input_ids)
         return MatchResult(RadixCacheHandle(prefix_len, node))
 
+    # 插入一个node，能
     def insert_prefix(self, input_ids: torch.Tensor, indices: torch.Tensor) -> InsertResult:
         insert_len = align_down(len(input_ids), self.page_size)
         input_ids, indices = input_ids[:insert_len], indices[:insert_len]
         node, prefix_len = self._tree_walk(input_ids)
         if prefix_len != insert_len:  # NOTE: prefix_len < insert_len
+            # 剩下的部分要整一个new node
             new_node = RadixTreeNode(self.key_fn)
             new_node.set_key_value(input_ids[prefix_len:], indices[prefix_len:].clone())
             new_node.set_parent(node)
@@ -187,6 +190,7 @@ class RadixPrefixCache(BasePrefixCache):
     def check_integrity(self) -> None:
         pass
 
+    # 使用广度优先算法算出，有多少没有引用的叶子节点
     def _collect_leave_nodes_for_evict(self) -> List[RadixTreeNode]:
         nodes: List[RadixTreeNode] = [self.root_node]
         leave_nodes: List[RadixTreeNode] = []
@@ -202,6 +206,7 @@ class RadixPrefixCache(BasePrefixCache):
 
         return leave_nodes
 
+    # 获取前缀匹配，获得最下层的node，以及prefix_len
     def _tree_walk(self, input_ids: torch.Tensor) -> Tuple[RadixTreeNode, int]:
         prefix_len = 0
         indice_len = len(input_ids)
@@ -221,6 +226,7 @@ class RadixPrefixCache(BasePrefixCache):
 
             # need to split the node if not fully matched
             if match_len != node.length:
+                # 创建分叉
                 node = node.split_at(match_len)
                 node.timestamp = tic
                 return node, prefix_len
@@ -231,6 +237,7 @@ class RadixPrefixCache(BasePrefixCache):
         return node, prefix_len
 
 
+# key生成函数，简单理解为用page_size个token整成一个key
 def _get_key_fn(page_size: int) -> KEY_FN:
     if page_size == 1:
         return lambda x: x[0].item()

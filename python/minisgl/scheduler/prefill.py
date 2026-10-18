@@ -47,6 +47,8 @@ class PrefillAdder:
         extend_len = req.input_len - cached_len
         estimated_len = extend_len + req.output_len
 
+        # self.reserved_size：已经分配出去的kv长度
+        # estimated_len：预估的kv长度
         if estimated_len + self.reserved_size > self.cache_manager.available_size:
             return None
         self.cache_manager.lock(handle)
@@ -120,9 +122,11 @@ class PrefillManager:
     decode_manager: DecodeManager
     pending_list: List[PendingReq] = field(default_factory=list)
 
+    # 添加到prefill队列
     def add_one_req(self, req: UserMsg) -> None:
         self.pending_list.append(PendingReq(req.uid, req.input_ids, req.sampling_params))
 
+    # 从prefill队列取出
     def schedule_next_batch(self, prefill_budget: int) -> Batch | None:
         if len(self.pending_list) == 0:
             return None
